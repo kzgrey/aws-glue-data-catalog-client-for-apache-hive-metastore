@@ -537,7 +537,7 @@ public class GlueMetastoreClientDelegate {
       //   1. Table is not accessible by this cluster (a cluster local table).
       //   2. Table is partitioned
       //   3. Stats explicitly provided
-      //
+      // Additionally, don't fail if you can't update the stats in the supported cases.
       if (newTable.getSd().getLocation() != null && !isClusterLocalFileSystem(newTable.getSd().getLocation()) )  {
         Path path = new Path(newTable.getSd().getLocation());
         try  {
@@ -547,7 +547,11 @@ public class GlueMetastoreClientDelegate {
           logger.warn("Cannot access new partition path, skipping stats update: " + path.toString(), e);
         }
         org.apache.hadoop.hive.metastore.api.Database db = getDatabase(newTable.getDbName());
-        hiveShims.updateTableStatsFast(db, newTable, wh, false, true, environmentContext);
+        try  {
+          hiveShims.updateTableStatsFast(db, newTable, wh, false, true, environmentContext);
+        } catch (IllegalArgumentException e)  {
+          logger.warn("Cannot access table path, or db path missing: ", e);
+        }
       }
     }
 
