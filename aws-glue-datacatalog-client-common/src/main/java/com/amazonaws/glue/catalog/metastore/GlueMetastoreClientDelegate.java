@@ -291,6 +291,11 @@ public class GlueMetastoreClientDelegate {
 
     try {
       DatabaseInput catalogDatabase = GlueInputConverter.convertToDatabaseInput(database);
+      if (isNullOrEmpty(catalogDatabase.getLocationUri()))  {
+        logger.info("Database location empty. Setting it to warehouse default.");
+        String dummyDbLoc = wh.getWhRoot().toString() + "/" + database.getName() + ".db";
+        catalogDatabase.setLocationUri(dummyDbLoc);
+      }
       UpdateDatabaseRequest updateDatabaseRequest = new UpdateDatabaseRequest().withName(databaseName)
           .withDatabaseInput(catalogDatabase).withCatalogId(catalogId);
       glueClient.updateDatabase(updateDatabaseRequest);
@@ -301,6 +306,12 @@ public class GlueMetastoreClientDelegate {
       logger.error(msg, e);
       throw new MetaException(msg + e);
     }
+  }
+
+  private boolean isNullOrEmpty(String str) {
+    if (str != null && !str.isEmpty())
+      return false;
+    return true;
   }
 
   public void dropDatabase(String name, boolean deleteData, boolean ignoreUnknownDb, boolean cascade) throws TException {
