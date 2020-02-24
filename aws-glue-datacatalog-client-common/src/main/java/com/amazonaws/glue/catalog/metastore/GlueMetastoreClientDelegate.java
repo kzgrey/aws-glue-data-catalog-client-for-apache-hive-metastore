@@ -173,6 +173,9 @@ public class GlueMetastoreClientDelegate {
    */
   public static final int DEFAULT_NUM_PARTITION_SEGMENTS = 5;
 
+  // OKERA
+  public static final String OKERA_JDBC_INPUTFORMAT_NAME = "com.cerebro.recordservice.JdbcInputFormat";
+
   /**
    * Currently the upper limit allowed by Glue is 10.
    *
@@ -186,7 +189,7 @@ public class GlueMetastoreClientDelegate {
   private final AwsGlueHiveShims hiveShims = ShimsLoader.getHiveShims();
   private final String catalogId;
   private final int numPartitionSegments;
-  
+
   public static final String CATALOG_ID_CONF = "hive.metastore.glue.catalogid";
   public static final String NUM_PARTITION_SEGMENTS_CONF = "aws.glue.partition.num.segments";
 
@@ -293,8 +296,8 @@ public class GlueMetastoreClientDelegate {
       DatabaseInput catalogDatabase = GlueInputConverter.convertToDatabaseInput(database);
       if (isNullOrEmpty(catalogDatabase.getLocationUri()))  {
         logger.info("Database location empty. Setting it to warehouse default.");
-        String dummyDbLoc = wh.getWhRoot().toString() + "/" + database.getName() + ".db";
-        catalogDatabase.setLocationUri(dummyDbLoc);
+        StringBuffer dummyDbLoc = getDummyDbLoc(database.getName());
+        catalogDatabase.setLocationUri(dummyDbLoc.toString());
       }
       UpdateDatabaseRequest updateDatabaseRequest = new UpdateDatabaseRequest().withName(databaseName)
           .withDatabaseInput(catalogDatabase).withCatalogId(catalogId);
@@ -306,6 +309,12 @@ public class GlueMetastoreClientDelegate {
       logger.error(msg, e);
       throw new MetaException(msg + e);
     }
+  }
+
+  private StringBuffer getDummyDbLoc(String dbName) throws MetaException  {
+    StringBuffer dummyDbLoc = new StringBuffer(wh.getWhRoot().toString());
+    dummyDbLoc.append("/").append(dbName).append(".db");
+    return dummyDbLoc;
   }
 
   private boolean isNullOrEmpty(String str) {
@@ -375,6 +384,14 @@ public class GlueMetastoreClientDelegate {
 
   public void createTable(org.apache.hadoop.hive.metastore.api.Table tbl) throws TException {
     checkNotNull(tbl, "tbl cannot be null");
+    // OKERA: if JDBC table, make sure mock file:/ location is used.
+    if (tbl.getSd().getInputFormat().equals(OKERA_JDBC_INPUTFORMAT_NAME)) {
+      logger.info("JDBC table found. Setting mock table location");
+      StringBuffer dummyTblLoc = getDummyDbLoc(tbl.getDbName())
+        .append("/")
+        .append(tbl.getTableName());
+      tbl.getSd().setLocation(dummyTblLoc.toString());
+    }
     boolean dirCreated = validateNewTableAndCreateDirectory(tbl);
     try {
       // Glue Server side does not set DDL_TIME. Set it here for the time being.
