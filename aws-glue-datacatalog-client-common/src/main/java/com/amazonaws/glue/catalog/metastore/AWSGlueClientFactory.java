@@ -21,6 +21,7 @@ import static com.amazonaws.glue.catalog.util.AWSGlueConfig.AWS_GLUE_CONNECTION_
 import static com.amazonaws.glue.catalog.util.AWSGlueConfig.AWS_GLUE_ENDPOINT;
 import static com.amazonaws.glue.catalog.util.AWSGlueConfig.AWS_GLUE_MAX_CONNECTIONS;
 import static com.amazonaws.glue.catalog.util.AWSGlueConfig.AWS_GLUE_MAX_RETRY;
+import static com.amazonaws.glue.catalog.util.AWSGlueConfig.OKERA_AWS_GLUE_REGION;
 import static com.amazonaws.glue.catalog.util.AWSGlueConfig.AWS_GLUE_SOCKET_TIMEOUT;
 import static com.amazonaws.glue.catalog.util.AWSGlueConfig.AWS_REGION;
 import static com.amazonaws.glue.catalog.util.AWSGlueConfig.DEFAULT_CONNECTION_TIMEOUT;
@@ -46,12 +47,16 @@ public final class AWSGlueClientFactory implements GlueClientFactory {
           .withCredentials(getAWSCredentialsProvider(conf));
 
       String regionStr = getProperty(AWS_REGION, conf);
+      String okeraGlueRegion = getProperty(OKERA_AWS_GLUE_REGION, conf);
       String glueEndpoint = getProperty(AWS_GLUE_ENDPOINT, conf);
 
       // ClientBuilder only allows one of EndpointConfiguration or Region to be set
       if (StringUtils.isNotBlank(glueEndpoint)) {
         logger.info("Setting glue service endpoint to " + glueEndpoint);
         glueClientBuilder.setEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(glueEndpoint, null));
+      } else if (StringUtils.isNotBlank(okeraGlueRegion)) {
+        logger.info("Setting region from config 'okera.aws.glue.region': " + okeraGlueRegion);
+        glueClientBuilder.setRegion(okeraGlueRegion);
       } else if (StringUtils.isNotBlank(regionStr)) {
         logger.info("Setting region to : " + regionStr);
         glueClientBuilder.setRegion(regionStr);
@@ -61,7 +66,7 @@ public final class AWSGlueClientFactory implements GlueClientFactory {
           logger.info("Using region from ec2 metadata : " + currentRegion.getName());
           glueClientBuilder.setRegion(currentRegion.getName());
         } else {
-          logger.info("No region info found, using SDK default region: us-east-1");
+          logger.info("No region info found, using SDK default region");
         }
       }
 
