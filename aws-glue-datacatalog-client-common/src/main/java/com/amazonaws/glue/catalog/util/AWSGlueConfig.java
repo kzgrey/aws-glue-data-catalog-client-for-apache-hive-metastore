@@ -8,6 +8,7 @@ public final class AWSGlueConfig {
 
   public static final String AWS_GLUE_ENDPOINT = "aws.glue.endpoint";
   public static final String AWS_REGION = "aws.region";
+  public static final String OKERA_AWS_GLUE_REGION = "okera.aws.glue.region";
   public static final String AWS_CATALOG_CREDENTIALS_PROVIDER_FACTORY_CLASS
       = "aws.catalog.credentials.provider.factory.class";
 
