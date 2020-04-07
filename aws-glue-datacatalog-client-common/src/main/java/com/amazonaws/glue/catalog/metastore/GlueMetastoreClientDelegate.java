@@ -113,7 +113,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -161,10 +160,6 @@ public class GlueMetastoreClientDelegate {
 
   private static final int NUM_EXECUTOR_THREADS = 5;
   static final String GLUE_METASTORE_DELEGATE_THREADPOOL_NAME_FORMAT = "glue-metastore-delegate-%d";
-  private static org.apache.hadoop.hive.metastore.api.Database systemDb;
-  private static org.apache.hadoop.hive.metastore.api.Database defaultDb;
-  private static Map<String, org.apache.hadoop.hive.metastore.api.Table> systemDbMap;
-  private static Map<String, org.apache.hadoop.hive.metastore.api.Table> defaultDbMap;
   private static final ExecutorService GLUE_METASTORE_DELEGATE_THREAD_POOL = Executors.newFixedThreadPool(
     NUM_EXECUTOR_THREADS,
     new ThreadFactoryBuilder()
@@ -191,7 +186,7 @@ public class GlueMetastoreClientDelegate {
   private final AwsGlueHiveShims hiveShims = ShimsLoader.getHiveShims();
   private final String catalogId;
   private final int numPartitionSegments;
-
+  
   public static final String CATALOG_ID_CONF = "hive.metastore.glue.catalogid";
   public static final String NUM_PARTITION_SEGMENTS_CONF = "aws.glue.partition.num.segments";
 
@@ -208,11 +203,6 @@ public class GlueMetastoreClientDelegate {
     this.wh = wh;
     // TODO - May be validate catalogId confirms to AWS AccountId too.
     catalogId = MetastoreClientUtils.getCatalogId(conf);
-    systemDb = null;
-    defaultDb = null;
-    systemDbMap = new HashMap<String, org.apache.hadoop.hive.metastore.api.Table>();
-    defaultDbMap = new HashMap<String, org.apache.hadoop.hive.metastore.api.Table>();
-
   }
 
   // ======================= Database =======================
@@ -247,31 +237,12 @@ public class GlueMetastoreClientDelegate {
 
   public org.apache.hadoop.hive.metastore.api.Database getDatabase(String name) throws TException {
     checkArgument(StringUtils.isNotEmpty(name), "name cannot be null or empty");
-    if (name.equalsIgnoreCase("okera_system"))  {
-      if (systemDb != null) {
-        return systemDb;
-      }
-    }
-    if (name.equalsIgnoreCase("default"))  {
-      if (defaultDb != null) {
-        return defaultDb;
-      }
-    }
 
     try {
       GetDatabaseRequest getDatabaseRequest = new GetDatabaseRequest().withName(name).withCatalogId(catalogId);
-      System.out.println("SVDEBUG:RPC: getDatabase: calling getDatabase: " + name);
       GetDatabaseResult result = glueClient.getDatabase(getDatabaseRequest);
       Database catalogDatabase = result.getDatabase();
-      if (catalogDatabase.getName().equalsIgnoreCase("okera_system")) {
-        systemDb = CatalogToHiveConverter.convertDatabase(catalogDatabase);
-        return systemDb;
-      } else if(catalogDatabase.getName().equalsIgnoreCase("default")) {
-        defaultDb = CatalogToHiveConverter.convertDatabase(catalogDatabase);
-        return defaultDb;
-      } else  {
-        return CatalogToHiveConverter.convertDatabase(catalogDatabase);
-      }
+      return CatalogToHiveConverter.convertDatabase(catalogDatabase);
     } catch (AmazonServiceException e) {
       throw CatalogToHiveConverter.wrapInHiveException(e);
     } catch (Exception e){
@@ -438,26 +409,10 @@ public class GlueMetastoreClientDelegate {
       logger.warn("Database: " + databaseName + " does not exist.");
       return false;
     }
-    if (databaseName.equalsIgnoreCase("default")) {
-      if (defaultDbMap.containsKey(tableName))  {
-        return true;
-      }
-    }
-    if (databaseName.equalsIgnoreCase("okera_system")) {
-      if (systemDbMap.containsKey(tableName))  {
-        return true;
-      }
-    }
     try {
       GetTableRequest getTableRequest = new GetTableRequest().withDatabaseName(databaseName).withName(tableName)
           .withCatalogId(catalogId);
-      System.out.println("SVDEBUG:RPC: tableExists: calling getTable: " + databaseName + "." + tableName);
-      GetTableResult result = glueClient.getTable(getTableRequest);
-      if (databaseName.equalsIgnoreCase("default")) {
-        defaultDbMap.put(tableName, CatalogToHiveConverter.convertTable(result.getTable(), databaseName));
-      } else if (databaseName.equalsIgnoreCase("okera_system")) {
-        systemDbMap.put(tableName, CatalogToHiveConverter.convertTable(result.getTable(), databaseName));
-      }
+      glueClient.getTable(getTableRequest);
       return true;
     } catch (EntityNotFoundException e) {
       return false;
@@ -473,30 +428,13 @@ public class GlueMetastoreClientDelegate {
   public org.apache.hadoop.hive.metastore.api.Table getTable(String dbName, String tableName) throws TException {
     checkArgument(StringUtils.isNotEmpty(dbName), "dbName cannot be null or empty");
     checkArgument(StringUtils.isNotEmpty(tableName), "tableName cannot be null or empty");
-    if (dbName.equalsIgnoreCase("default")) {
-      if (defaultDbMap.containsKey(tableName))  {
-        return defaultDbMap.get(tableName);
-      }
-    }
-    if (dbName.equalsIgnoreCase("okera_system")) {
-      if (systemDbMap.containsKey(tableName))  {
-        return systemDbMap.get(tableName);
-      }
-    }
 
     try {
       GetTableRequest getTableRequest = new GetTableRequest().withDatabaseName(dbName).withName(tableName)
           .withCatalogId(catalogId);
-      System.out.println("SVDEBUG:RPC: getTable: calling getTable: " + dbName + "." + tableName);
       GetTableResult result = glueClient.getTable(getTableRequest);
       validateGlueTable(result.getTable());
-      org.apache.hadoop.hive.metastore.api.Table retTbl = CatalogToHiveConverter.convertTable(result.getTable(), dbName);
-      if (dbName.equalsIgnoreCase("default")) {
-        defaultDbMap.put(tableName, retTbl);
-      } else if (dbName.equalsIgnoreCase("okera_system")) {
-        systemDbMap.put(tableName, retTbl);
-      }
-      return retTbl;
+      return CatalogToHiveConverter.convertTable(result.getTable(), dbName);
     } catch (AmazonServiceException e) {
       throw CatalogToHiveConverter.wrapInHiveException(e);
     } catch (Exception e) {
@@ -1027,7 +965,7 @@ public class GlueMetastoreClientDelegate {
     checkArgument(StringUtils.isNotEmpty(dbName), "dbName cannot be null or empty");
     checkArgument(StringUtils.isNotEmpty(tblName), "tblName cannot be null or empty");
     checkNotNull(values, "values cannot be null");
-
+   
     GetPartitionRequest request = new GetPartitionRequest()
         .withDatabaseName(dbName)
         .withTableName(tblName)
@@ -1273,7 +1211,7 @@ public class GlueMetastoreClientDelegate {
         .withPartitionInput(partitionInput)
         .withPartitionValueList(part.getValues())
         .withCatalogId(catalogId);
-
+     
       try {
         glueClient.updatePartition(request);
       } catch (AmazonServiceException e) {
@@ -1788,11 +1726,11 @@ public class GlueMetastoreClientDelegate {
   public void setUGI(String username) throws TException {
     throw new UnsupportedOperationException("setUGI is unsupported");
   }
-
+  
   /**
    * Gets the user defined function in a database stored in metastore and
    * converts back to Hive function.
-   *
+   * 
    * @param dbName
    * @param functionName
    * @return
@@ -1819,7 +1757,7 @@ public class GlueMetastoreClientDelegate {
   /**
    * Gets user defined functions that match a pattern in database stored in
    * metastore and converts back to Hive function.
-   *
+   * 
    * @param dbName
    * @param functionName
    * @return
@@ -1854,7 +1792,7 @@ public class GlueMetastoreClientDelegate {
 
   /**
    * Creates a new user defined function in the metastore.
-   *
+   * 
    * @param function
    * @throws InvalidObjectException
    * @throws MetaException
@@ -1879,7 +1817,7 @@ public class GlueMetastoreClientDelegate {
 
   /**
    * Drops a user defined function in the database stored in metastore.
-   *
+   * 
    * @param dbName
    * @param functionName
    * @throws MetaException
@@ -1903,10 +1841,10 @@ public class GlueMetastoreClientDelegate {
       throw new MetaException(msg + e);
     }
   }
-
+  
   /**
    * Updates a user defined function in a database stored in the metastore.
-   *
+   * 
    * @param dbName
    * @param functionName
    * @param newFunction
@@ -1932,10 +1870,10 @@ public class GlueMetastoreClientDelegate {
       throw new MetaException(msg + e);
     }
   }
-
+  
   /**
    * Fetches the fields for a table in a database.
-   *
+   * 
    * @param db
    * @param tableName
    * @return
@@ -1949,7 +1887,6 @@ public class GlueMetastoreClientDelegate {
     try {
       GetTableRequest getTableRequest = new GetTableRequest().withDatabaseName(db).withName(tableName)
           .withCatalogId(catalogId);
-      System.out.println("SVDEBUG:RPC: getFields: calling getTable: " + db + "." + tableName);
       GetTableResult result = glueClient.getTable(getTableRequest);
       Table table = result.getTable();
       return CatalogToHiveConverter.convertFieldSchemaList(table.getStorageDescriptor().getColumns());
@@ -1961,10 +1898,10 @@ public class GlueMetastoreClientDelegate {
       throw new MetaException(msg + e);
     }
   }
-
+  
   /**
    * Fetches the schema for a table in a database.
-   *
+   * 
    * @param db
    * @param tableName
    * @return
@@ -1978,7 +1915,6 @@ public class GlueMetastoreClientDelegate {
     try {
       GetTableRequest getTableRequest = new GetTableRequest().withDatabaseName(db).withName(tableName)
           .withCatalogId(catalogId);
-      System.out.println("SVDEBUG:RPC: getSchema: calling getTable: " + db + "." + tableName);
       GetTableResult result = glueClient.getTable(getTableRequest);
       Table table = result.getTable();
       List<Column> schemas = table.getStorageDescriptor().getColumns();
@@ -1997,7 +1933,7 @@ public class GlueMetastoreClientDelegate {
 
   /**
    * Updates the partition values for a table in database stored in metastore.
-   *
+   * 
    * @param databaseName
    * @param tableName
    * @param partitionValues
