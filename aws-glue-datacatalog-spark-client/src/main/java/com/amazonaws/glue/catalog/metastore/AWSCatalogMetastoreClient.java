@@ -123,7 +123,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   private final Warehouse wh;
   private final GlueMetastoreClientDelegate glueMetastoreClientDelegate;
   private final String catalogId;
-  
+
   private static final int BATCH_DELETE_PARTITIONS_PAGE_SIZE = 25;
   private static final int BATCH_DELETE_PARTITIONS_THREADS_COUNT = 5;
   static final String BATCH_DELETE_PARTITIONS_THREAD_POOL_NAME_FORMAT = "batch-delete-partitions-%d";
@@ -136,6 +136,13 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
 
   private final AwsGlueHiveShims hiveShims = ShimsLoader.getHiveShims();
   private Map<String, String> currentMetaVars;
+
+  // General idea: Map from tblName inside okera_system to the hms object. This is a trash
+  // 10-minute cache and does not address any eviction/staleness yet.
+  // In getTable, if the dbName is okera_system, check if the table object exists here,
+  // else get it from glue and set it here.
+  private Map<String, org.apache.hadoop.hive.metastore.api.Table> sysTableMap;
+  private Database systemDb;
 
   public AWSCatalogMetastoreClient(HiveConf conf) throws MetaException {
     this(conf, null);
@@ -154,6 +161,9 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
     if (!doesDefaultDBExist()) {
       createDefaultDatabase();
     }
+    System.out.println("SVDEBUG: initing the sysTableMap");
+    sysTableMap = new HashMap<String, org.apache.hadoop.hive.metastore.api.Table>();
+    systemDb = null;
     catalogId = MetastoreClientUtils.getCatalogId(conf);
   }
 
@@ -182,7 +192,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
       this.catalogId = catalogId;
       return this;
     }
-    
+
     public Builder withWarehouse(Warehouse wh) {
       this.wh = wh;
       return this;
@@ -206,7 +216,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
     } else {
       this.wh = new Warehouse(conf);
     }
-    
+
     if (builder.catalogId != null) {
       this.catalogId = builder.catalogId;
     } else {
@@ -231,6 +241,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   private boolean doesDefaultDBExist() throws MetaException {
     try {
       GetDatabaseRequest getDatabaseRequest = new GetDatabaseRequest().withName(DEFAULT_DATABASE_NAME).withCatalogId(catalogId);
+      System.out.println("SVDEBUG:RPC: : doesDefaultDBExist: calling getDatabase: " + DEFAULT_DATABASE_COMMENT);
       glueClient.getDatabase(getDatabaseRequest);
     } catch (EntityNotFoundException e) {
       return false;
@@ -274,6 +285,18 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
 
   @Override
   public Database getDatabase(String name) throws NoSuchObjectException, MetaException, TException {
+    if (name.equalsIgnoreCase("okera_system"))  {
+      if (systemDb != null) {
+        System.out.println("SVDEBUG: Returning okera_system from cache");
+        return systemDb;
+      }
+      else {
+        systemDb = glueMetastoreClientDelegate.getDatabase(name);
+        System.out.println("SVDEBUG: Returning okera_system from glue");
+        return systemDb;
+      }
+    }
+    System.out.println("SVDEBUG: Returning non okera_system DB: " + name);
     return glueMetastoreClientDelegate.getDatabase(name);
   }
 
@@ -346,7 +369,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   @Override
   public void alterFunction(String dbName, String functionName, org.apache.hadoop.hive.metastore.api.Function newFunction) throws InvalidObjectException,
         MetaException, TException {
-    glueMetastoreClientDelegate.alterFunction(dbName, functionName, newFunction);      
+    glueMetastoreClientDelegate.alterFunction(dbName, functionName, newFunction);
   }
 
   @Override
@@ -950,7 +973,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   @Override
   public List<FieldSchema> getSchema(String db, String tableName) throws MetaException, TException, UnknownTableException,
         UnknownDBException {
-    return glueMetastoreClientDelegate.getSchema(db, tableName);    
+    return glueMetastoreClientDelegate.getSchema(db, tableName);
   }
 
   @Deprecated
@@ -962,7 +985,23 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   @Override
   public org.apache.hadoop.hive.metastore.api.Table getTable(String dbName, String tableName)
         throws MetaException, TException, NoSuchObjectException {
-    return glueMetastoreClientDelegate.getTable(dbName, tableName);
+    if (dbName.equalsIgnoreCase("okera_system"))  {
+      System.out.println("SVDEBUG: getting system table: " + tableName);
+      if (sysTableMap.containsKey(tableName.toLowerCase())) {
+        System.out.println("SVDEBUG: getting table from cache: " + tableName);
+        return sysTableMap.get(tableName.toLowerCase());
+      } else  {
+        System.out.println("SVDEBUG: getting table from glue: " + tableName);
+        org.apache.hadoop.hive.metastore.api.Table retTbl;
+        retTbl = glueMetastoreClientDelegate.getTable(dbName, tableName);
+        System.out.println("SVDEBUG: setting tbl to cachee: " + tableName);
+        sysTableMap.put(tableName.toLowerCase(), retTbl);
+        return retTbl;
+      }
+    } else  {
+      System.out.println("SVDEBUG: getting non-cache table: " + dbName + "." + tableName);
+      return glueMetastoreClientDelegate.getTable(dbName, tableName);
+    }
   }
 
   @Override
@@ -1042,7 +1081,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
           String newVar = conf.get(oneVar.varname, "");
           if (oldVar == null ||
                 (oneVar.isCaseSensitive() ? !oldVar.equals(newVar) : !oldVar.equalsIgnoreCase(newVar))) {
-              logger.info("Mestastore configuration " + oneVar.varname +
+              System.out.println("Mestastore configuration " + oneVar.varname +
                     " changed from " + oldVar + " to " + newVar);
               compatible = false;
           }
@@ -1210,7 +1249,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
       try {
         set = get_privilege_set(obj, user, groups);
       } catch (MetaException e) {
-        logger.info(String.format("No privileges found for user: %s, "
+        System.out.println(String.format("No privileges found for user: %s, "
             + "groups: [%s]", user, LoggingHelper.concatCollectionToStringForLogging(groups, ",")));
         set = new org.apache.hadoop.hive.metastore.api.PrincipalPrivilegeSet();
       }
@@ -1420,6 +1459,9 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   @Override
   public boolean tableExists(String databaseName, String tableName) throws MetaException, TException,
         UnknownDBException {
+    if (databaseName.equalsIgnoreCase(DEFAULT_DATABASE_NAME) && tableName.equalsIgnoreCase(tableName)) {
+      return false;
+    }
     return glueMetastoreClientDelegate.tableExists(databaseName, tableName);
   }
 
