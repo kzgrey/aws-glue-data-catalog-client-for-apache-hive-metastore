@@ -123,7 +123,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   private final Warehouse wh;
   private final GlueMetastoreClientDelegate glueMetastoreClientDelegate;
   private final String catalogId;
-  
+
   private static final int BATCH_DELETE_PARTITIONS_PAGE_SIZE = 25;
   private static final int BATCH_DELETE_PARTITIONS_THREADS_COUNT = 5;
   static final String BATCH_DELETE_PARTITIONS_THREAD_POOL_NAME_FORMAT = "batch-delete-partitions-%d";
@@ -182,7 +182,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
       this.catalogId = catalogId;
       return this;
     }
-    
+
     public Builder withWarehouse(Warehouse wh) {
       this.wh = wh;
       return this;
@@ -206,7 +206,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
     } else {
       this.wh = new Warehouse(conf);
     }
-    
+
     if (builder.catalogId != null) {
       this.catalogId = builder.catalogId;
     } else {
@@ -228,18 +228,14 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
     }
   }
 
-  private boolean doesDefaultDBExist() throws MetaException {
+  private boolean doesDefaultDBExist() throws MetaException  {
     try {
-      GetDatabaseRequest getDatabaseRequest = new GetDatabaseRequest().withName(DEFAULT_DATABASE_NAME).withCatalogId(catalogId);
-      glueClient.getDatabase(getDatabaseRequest);
-    } catch (EntityNotFoundException e) {
-      return false;
-    } catch (AmazonServiceException e) {
+      return glueMetastoreClientDelegate.databaseExists(DEFAULT_DATABASE_NAME);
+    } catch (AmazonServiceException | TException e) {
       String msg = "Unable to verify existence of default database: ";
       logger.error(msg, e);
       throw new MetaException(msg + e);
     }
-    return true;
   }
 
   private void createDefaultDatabase() throws MetaException {
@@ -346,7 +342,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   @Override
   public void alterFunction(String dbName, String functionName, org.apache.hadoop.hive.metastore.api.Function newFunction) throws InvalidObjectException,
         MetaException, TException {
-    glueMetastoreClientDelegate.alterFunction(dbName, functionName, newFunction);      
+    glueMetastoreClientDelegate.alterFunction(dbName, functionName, newFunction);
   }
 
   @Override
@@ -950,7 +946,7 @@ public class AWSCatalogMetastoreClient implements IMetaStoreClient {
   @Override
   public List<FieldSchema> getSchema(String db, String tableName) throws MetaException, TException, UnknownTableException,
         UnknownDBException {
-    return glueMetastoreClientDelegate.getSchema(db, tableName);    
+    return glueMetastoreClientDelegate.getSchema(db, tableName);
   }
 
   @Deprecated
