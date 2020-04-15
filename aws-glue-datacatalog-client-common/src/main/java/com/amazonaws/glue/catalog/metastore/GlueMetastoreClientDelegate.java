@@ -133,6 +133,7 @@ import static com.amazonaws.glue.catalog.util.MetastoreClientUtils.validateTable
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.hadoop.hive.metastore.HiveMetaStore.PUBLIC;
+import static org.apache.hadoop.hive.metastore.MetaStoreUtils.DEFAULT_DATABASE_NAME;
 import static org.apache.hadoop.hive.metastore.TableType.EXTERNAL_TABLE;
 import static org.apache.hadoop.hive.metastore.TableType.MANAGED_TABLE;
 
@@ -190,7 +191,10 @@ public class GlueMetastoreClientDelegate {
 
   public static final String CATALOG_ID_CONF = "hive.metastore.glue.catalogid";
   public static final String NUM_PARTITION_SEGMENTS_CONF = "aws.glue.partition.num.segments";
+
+  // Okera modifications
   private static OkeraSystemMetadataCache okeraCache;
+  private static final String LOG_GLUE_RPC_ENV_VAR = "OKERA_LOG_GLUE_RPC";
 
   public GlueMetastoreClientDelegate(HiveConf conf, AWSGlue glueClient, Warehouse wh) throws MetaException {
     checkNotNull(conf, "Hive Config cannot be null");
@@ -264,6 +268,7 @@ public class GlueMetastoreClientDelegate {
       logger.info("Returning db object from cache: " + name);
       return cachedDbObj;
     }
+    logger.info("Returning db object from glue: " + name);
     GetDatabaseRequest getDatabaseRequest = new GetDatabaseRequest().withName(name).withCatalogId(catalogId);
     logRPC("getDatabase", name);
     GetDatabaseResult result = glueClient.getDatabase(getDatabaseRequest);
@@ -404,6 +409,12 @@ public class GlueMetastoreClientDelegate {
     checkNotNull(tbl, "tbl cannot be null");
     boolean dirCreated = validateNewTableAndCreateDirectory(tbl);
     try {
+      // Okera: if attempting to create default.okera_system, fail out immediately.
+      if (tbl.getDbName().equalsIgnoreCase(DEFAULT_DATABASE_NAME)
+          && tbl.getTableName().equalsIgnoreCase("okera_system")) {
+        logger.debug("Attempt to create default.okera_system. Throwing an exception");
+        throw new MetaException("Creating table default.okera_system not allowed.");
+      }
       // Glue Server side does not set DDL_TIME. Set it here for the time being.
       // TODO: Set DDL_TIME parameter in Glue service
       tbl.setParameters(deepCopyMap(tbl.getParameters()));
@@ -433,6 +444,13 @@ public class GlueMetastoreClientDelegate {
   public boolean tableExists(String databaseName, String tableName) throws TException {
     checkArgument(StringUtils.isNotEmpty(databaseName), "databaseName cannot be null or empty");
     checkArgument(StringUtils.isNotEmpty(tableName), "tableName cannot be null or empty");
+
+    // OKERA: we're blocking creation and access of table named default.okera_system.
+    if (databaseName.equalsIgnoreCase(DEFAULT_DATABASE_NAME)
+        && tableName.equalsIgnoreCase("okera_system"))  {
+      logger.debug("lookup for default.okera_system. always false by design.");
+      return false;
+    }
 
     if (!databaseExists(databaseName)) {
       //TODO: All the catches may need silencing here. Play by ear as things break.
@@ -1973,8 +1991,10 @@ public class GlueMetastoreClientDelegate {
     // check if table object in cache
     org.apache.hadoop.hive.metastore.api.Table cachedTblObject = okeraCache.getTbl(dbName, tblName);
     if (cachedTblObject != null)  {
+      logger.info("Returning table object from cache: " + (dbName + "." + tblName));
       return HiveToCatalogConverter.convertTable(cachedTblObject);
     }
+    logger.info("Returning table object from glue: " + (dbName + "." + tblName));
     // if not, get from glue
     GetTableRequest getTableRequest = new GetTableRequest().withDatabaseName(dbName).withName(tblName)
           .withCatalogId(catalogId);
@@ -2011,6 +2031,8 @@ public class GlueMetastoreClientDelegate {
   }
 
   private void logRPC (String rpcName, String objName)  {
-    logger.info("GLUERPC: Sending " + rpcName + "rpc for " + objName);
+    if (System.getenv(LOG_GLUE_RPC_ENV_VAR).equalsIgnoreCase("true")) {
+      logger.info("GLUERPC: Sending " + rpcName + "rpc for " + objName);
+    }
   }
 }

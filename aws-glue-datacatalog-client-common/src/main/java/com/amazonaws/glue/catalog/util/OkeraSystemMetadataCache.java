@@ -2,6 +2,7 @@ package com.amazonaws.glue.catalog.util;
 
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.log4j.Logger;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.Cache;
@@ -48,6 +49,8 @@ import java.util.Set;
  *   (TODO: lock/synchronize the public methods?)
  */
 public class OkeraSystemMetadataCache {
+  private static final Logger logger = Logger.getLogger(OkeraSystemMetadataCache.class);
+
   private static OkeraSystemMetadataCache instance;
 
   // DB Caching constants
