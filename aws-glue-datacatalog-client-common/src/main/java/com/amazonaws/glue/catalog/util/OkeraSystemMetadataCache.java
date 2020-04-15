@@ -130,7 +130,7 @@ public class OkeraSystemMetadataCache {
    * Helpers
    */
   private String getFullyQualifiedTblName(String dbName, String tblName)  {
-    return getCanonicalDbName(dbName).concat(getCanonicalTblName(tblName));
+    return getCanonicalDbName(dbName).concat(".").concat(getCanonicalTblName(tblName));
   }
 
   private String getCanonicalTblName(String tblName) {
